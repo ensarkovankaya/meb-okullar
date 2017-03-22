@@ -5,17 +5,27 @@ import re
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+error_handler = logging.FileHandler(filename='meb_error.log')
+error_handler.setLevel(logging.ERROR)
+error_handler.setFormatter(formatter)
+logger.addHandler(error_handler)
+
+debug_handler = logging.FileHandler(filename='meb_debug.log')
+debug_handler.setLevel(logging.DEBUG)
+debug_handler.setFormatter(formatter)
+logger.addHandler(debug_handler)
 
 ch = logging.StreamHandler()
-ch.setLevel(logging.DEBUG)
-ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+ch.setLevel(logging.INFO)
+ch.setFormatter(formatter)
 logger.addHandler(ch)
 
 http = urllib3.PoolManager(num_pools=1)
 
 
 class Ilce:
-    _pages = []
 
     def __repr__(self):
         return str("<Ilce: %s - %s>" % (self.iladi, self.ad))
@@ -25,32 +35,6 @@ class Ilce:
         self.ad = ad
         self.kod = kod
         self.url = url + "&ILCEKODU=" + str(kod)
-        self.data = None
-
-    def _get(self):
-        logger.debug('%s - %s ilçesi indiriliyor.' % (self.iladi, self.ad))
-        try:
-            respone = http.urlopen('GET', self.url)
-            self.data = BeautifulSoup(respone.data, 'html.parser')
-        except Exception:
-            logger.exception('%s - %s ilçesi sayfası indirilemedi!' % (self.iladi, self.ad))
-            raise
-
-    def _build_pages(self):
-        if self.data is None:
-            self._get()
-
-        logger.debug('Sayfalar oluşturuluyor.')
-
-        try:
-            lastpage = int(self.data.find('a', {'class': 'last'}).attrs.get('href').split('=')[-1])
-            logger.debug('Toplam alt sayfa sayısı: %s' % lastpage)
-
-            for i in range(lastpage):
-                self._pages.append(Page(i + 1, self.url))
-        except Exception:
-            logger.exception('%s - %s ilçesi alt sayfaları oluşturulamadı!' % (self.iladi, self.ad))
-            raise
 
     def okullar(self):
         okullar = []
@@ -60,13 +44,29 @@ class Ilce:
         return okullar
 
     def pages(self):
-        """
-        Sayfaları döner
-        :return:
-        """
-        if len(self._pages) == 0:
-            self._build_pages()
-        return self._pages
+        logger.debug('%s - %s ilçesi indiriliyor.' % (self.iladi, self.ad))
+        try:
+            respone = http.urlopen('GET', self.url)
+            self.data = BeautifulSoup(respone.data, 'html.parser')
+        except Exception:
+            logger.exception('%s - %s ilçesi sayfası indirilemedi!' % (self.iladi, self.ad))
+            raise
+
+        logger.debug('Sayfalar oluşturuluyor.')
+
+        pages = []
+
+        try:
+            lastpage = int(self.data.find('a', {'class': 'last'}).attrs.get('href').split('=')[-1])
+            logger.debug('Toplam alt sayfa sayısı: %s' % lastpage)
+
+            for i in range(lastpage):
+                pages.append(Page(i + 1, self.url))
+        except Exception:
+            logger.exception('%s - %s ilçesi alt sayfaları oluşturulamadı!' % (self.iladi, self.ad))
+            raise
+
+        return pages
 
 class Il:
     _ilceler = []
@@ -81,9 +81,9 @@ class Il:
         self.ad = ad
         self.kod = kod
         self.url = base_url + "?ILKODU=" + str(kod)
-        self.data = None
 
-    def _get(self):
+    def ilceler(self):
+
         logger.info('%s ili indiriliyor.' % self.ad)
         try:
             respone = http.urlopen('GET', self.url)
@@ -92,23 +92,21 @@ class Il:
             logger.exception('%s sayfası indirilemedi!' % self.ad)
             raise
 
-    def _build_ilceler(self):
-        if self.data is None:
-            self._get()
-
         logger.info('%s ilçeleri ayrıştırılıyor.' % self.ad)
-        select = self.data.find('select', {'id': 'jumpMenu6'})
-        options = select.find_all('option')
-        options.pop(0)
-        for opt in options:
-            self._ilceler.append(
-                Ilce(opt.contents[0], opt.attrs.get('value').split('=')[-1], self.url, self.ad)
-            )
+        ilceler = []
+        try:
+            select = self.data.find('select', {'id': 'jumpMenu6'})
+            options = select.find_all('option')
+            options.pop(0)
+            for opt in options:
+                ilceler.append(
+                    Ilce(opt.contents[0], opt.attrs.get('value').split('=')[-1], self.url, self.ad)
+                )
+        except Exception:
+            logger.exception('%s ilçeleri ayrışıtırılamadı!' % self.ad)
+            raise
 
-    def ilceler(self):
-        if len(self._ilceler) == 0:
-            self._build_ilceler()
-        return self._ilceler
+        return ilceler
 
     def okullar(self):
         """
@@ -130,7 +128,9 @@ class Okul:
             a = data.find_all('a')[0]
             website = a.attrs.get('href')
             self.website = website if website != "#" else None
-            self.il, self.ilce, self.ad = a.contents[0].split(' - ')
+            self.il = a.contents[0].split(' - ')[0]
+            self.ilce = a.contents[0].split(' - ')[1]
+            self.ad = " ".join(a.contents[0].split(' - ')[2:])
             self.type = self._type(self.ad)
         except Exception:
             logger.exception('Okul datası hatalı!\nDATA: %s' % data)
@@ -159,34 +159,31 @@ class Page:
     def __init__(self, no, base_url):
         self.url = base_url + "&SAYFANO=" + str(no)
         self.no = no
-        self.data = None
         self._contents = []
 
-    def _get(self):
+    def _build_schools(self):
+
         logger.debug('Sayfa indiriliyor: %s' % self.url)
         respone = http.urlopen('GET', self.url)
-        self.data = BeautifulSoup(respone.data, 'html.parser')
+        data = BeautifulSoup(respone.data, 'html.parser')
 
-    def _build_okullar(self):
-        if self.data is None:
-            self._get()
+        schools = []
 
         try:
-            div = self.data.find('div', {'id': 'grid'})
+            div = data.find('div', {'id': 'grid'})
             table = div.find('table')
             contents = table.find_all('tr')
             contents.pop(0)  # table'ın ilk satırını çıkar
             for cont in contents:
                 okul = Okul(cont)
                 logger.debug('Okul: %s oluşturuldu' % okul.ad)
-                self._contents.append(okul)
+                schools.append(okul)
         except Exception:
             logger.exception('Sayfa %s için okullar ayrıştırılamadı.' % self.url)
+        return schools
 
     def get(self):
-        if len(self._contents) == 0:
-            self._build_okullar()
-        return self._contents
+        return self._build_schools()
 
 class Meb:
     def __init__(self):
