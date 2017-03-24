@@ -99,7 +99,7 @@ class Il:
         logger.info('%s ili indiriliyor.' % self.ad)
         try:
             respone = http.urlopen('GET', self.url)
-            self.data = BeautifulSoup(respone.data, 'html.parser')
+            data = BeautifulSoup(respone.data, 'html.parser')
         except Exception:
             logger.exception('%s sayfası indirilemedi!' % self.ad)
             raise
@@ -107,7 +107,7 @@ class Il:
         logger.info('%s ilçeleri ayrıştırılıyor.' % self.ad)
         ilceler = []
         try:
-            select = self.data.find('select', {'id': 'jumpMenu6'})
+            select = data.find('select', {'id': 'jumpMenu6'})
             options = select.find_all('option')
             options.pop(0)
             for opt in options:
@@ -276,6 +276,7 @@ class Meb:
                         for okul in sayfa.get():
                             logger.info("Okul yazılıyor: %i - %s" % (counter, okul.ad))
                             writer.writerow({
+                                'ulke_adi': 'Türkiye',
                                 'il_adi': il.ad,
                                 'il_kodu': il.kod,
                                 'ilce_adi': ilce.ad,
