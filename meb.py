@@ -2,6 +2,7 @@ from bs4 import BeautifulSoup
 import urllib3
 import logging
 import re
+import csv
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -50,12 +51,12 @@ class Ilce:
 
     def okullar(self):
         okullar = []
-        for p in self.pages():
+        for p in self.sayfalar():
             for o in p.get():
                 okullar.append(o)
         return okullar
 
-    def pages(self):
+    def sayfalar(self):
         logger.info('%s - %s ilçesi indiriliyor.' % (self.iladi, self.ad))
         try:
             respone = http.urlopen('GET', self.url)
@@ -73,7 +74,7 @@ class Ilce:
             logger.debug('Toplam alt sayfa sayısı: %s' % lastpage)
 
             for i in range(lastpage):
-                pages.append(Page(i + 1, self.url))
+                pages.append(Sayfa(i + 1, self.url))
         except Exception:
             logger.exception('%s - %s ilçesi alt sayfaları oluşturulamadı!' % (self.iladi, self.ad))
             raise
@@ -140,8 +141,8 @@ class Okul:
             a = data.find_all('a')[0]
             website = a.attrs.get('href')
             self.website = website if website != "#" else None
-            self.il = a.contents[0].split(' - ')[0]
-            self.ilce = a.contents[0].split(' - ')[1]
+            self.il = capitalize(a.contents[0].split(' - ')[0])
+            self.ilce = capitalize(a.contents[0].split(' - ')[1])
             self.ad = capitalize(" ".join(a.contents[0].split(' - ')[2:]))
             self.type = self._type(self.ad)
         except Exception:
@@ -173,7 +174,7 @@ class Okul:
                       "Öğretmeni"
 
         if re.findall("Ortaokul|ORTAOKUL|Orta Okul|ortaokul|ORTOKULU|Ortaoku|Ortakulu|ORTA OKULU|Ortaoklu|ORTAOOKULU|Ortaoklulu|Ortokulu", ad):
-            return "Ortokul"
+            return "Ortaokul"
         elif re.findall('ilkokul|İlkokul|İLKOKUL|İlköğretim|Ilkokulu|İlokulu|İlkokolu|İlk Okulu|İlkolkulu|İLOKULU|İLK OKULU|İkokulu|İlkkulu|İllkokulu|İlköğ', ad):
             return "İlkokul"
         elif re.findall("Lise|lise|LİSE", ad):
@@ -203,9 +204,9 @@ class Okul:
             return None
 
 
-class Page:
+class Sayfa:
     def __repr__(self):
-        return str("<Page: %s>" % self.no)
+        return str("<Sayfa: %s>" % self.no)
 
     def __init__(self, no, base_url):
         self.url = base_url + "&SAYFANO=" + str(no)
@@ -213,7 +214,7 @@ class Page:
         self._contents = []
 
     def get(self):
-        logger.info('İndiriliyor: %s' % self.url)
+        logger.info('Sayfa indiriliyor: %s' % self.url)
         respone = http.urlopen('GET', self.url)
         data = BeautifulSoup(respone.data, 'html.parser')
 
@@ -262,3 +263,26 @@ class Meb:
             for o in il.okullar():
                 schools.append(o)
         return schools
+
+    def tocsv(self, filename):
+        with open(filename, 'w') as csvfile:
+            fieldnames = ['il_adi', 'il_kodu', 'ilce_adi', 'ilce_kodu', 'okul_adi', 'okul_website', 'tip']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            counter = 0
+            for il in self.iller:
+                for ilce in il.ilceler():
+                    for sayfa in ilce.sayfalar():
+                        for okul in sayfa.get():
+                            logger.info("Okul yazılıyor: %i - %s" % (counter, okul.ad))
+                            writer.writerow({
+                                'il_adi': il.ad,
+                                'il_kodu': il.kod,
+                                'ilce_adi': ilce.ad,
+                                'ilce_kodu': ilce.kod,
+                                'okul_adi': okul.ad,
+                                'okul_website': okul.website,
+                                'tip': okul.type
+                            })
+                            counter += 1
+            logger.info("Toplam Yazılan Okul Sayısı: %s" % counter)
